@@ -19,3 +19,5 @@ certificates
 
 # Claude
 .claude/
+.vercel
+.env*
