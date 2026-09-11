@@ -8,7 +8,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=mybasket",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=mybasket",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -23,7 +23,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=basketeditor",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=basketeditor",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -38,7 +38,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=myitem&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=myitem&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -54,7 +54,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=videoresizer&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=videoresizer&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -70,7 +70,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=videostudio&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=videostudio&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -85,7 +85,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=videostudiobasket",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=videostudiobasket",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -101,7 +101,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=templates&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=templates&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -116,7 +116,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=assetusage&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=assetusage&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -132,7 +132,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=translatevideo&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=translatevideo&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -148,7 +148,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=creativetemplatecreate&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=creativetemplatecreate&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
@@ -164,7 +164,7 @@
     ],
     "parameters": {
       "sendToken": "none",
-      "url": "https://<your-app-url>/api/webhook?action=creativetemplatefill&mode=singleitem",
+      "url": "https://aprimo-editor-tools-two.vercel.app/api/webhook?action=creativetemplatefill&mode=singleitem",
       "location": "New",
       "timeout": 30,
       "httpMethod": "POST"
