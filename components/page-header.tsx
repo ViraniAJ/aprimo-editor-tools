@@ -13,6 +13,7 @@ const routeLabels: Record<string, string> = {
   "video-resizer": "Video Resizer",
   "video-studio": "Video Studio",
   "duplicates": "Duplicate Assets",
+  "report-labs": "Report Labs",
 }
 
 export function PageHeader() {

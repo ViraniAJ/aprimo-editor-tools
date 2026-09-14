@@ -1,0 +1,41 @@
+/* Report Labs chart palette.
+ *
+ * Validated categorical palette (colorblind-safe adjacent pairs in both modes),
+ * separate from the app's --chart-* tokens which fail the CVD checks.
+ * Slots are assigned to entities in fixed order and never cycled:
+ *   1 views · 2 downloads · 3 impressions · 4 plays · 5 users
+ * --rl-seq is the single hue used for magnitude (bars ranked low → high).
+ */
+.report-labs {
+  --rl-1: #2a78d6;
+  --rl-2: #eb6834;
+  --rl-3: #1baf7a;
+  --rl-4: #eda100;
+  --rl-5: #4a3aa7;
+  --rl-seq: #2a78d6;
+  --rl-seq-soft: #2a78d626;
+  --rl-muted: #9a9a9a;
+  --rl-grid: #e6e6e6;
+  --rl-good: #008300;
+  --rl-bad: #e34948;
+}
+.dark .report-labs {
+  --rl-1: #3987e5;
+  --rl-2: #d95926;
+  --rl-3: #199e70;
+  --rl-4: #c98500;
+  --rl-5: #9085e9;
+  --rl-seq: #3987e5;
+  --rl-seq-soft: #3987e533;
+  --rl-muted: #8a8a8a;
+  --rl-grid: #2f2f2f;
+  --rl-good: #4ec24e;
+  --rl-bad: #e66767;
+}
+
+.report-labs .recharts-cartesian-grid line {
+  stroke: var(--rl-grid);
+}
+.report-labs .recharts-text {
+  fill: var(--muted-foreground);
+}

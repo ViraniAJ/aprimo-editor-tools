@@ -3,7 +3,7 @@
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
-import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users } from "lucide-react"
+import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users, FlaskConical } from "lucide-react"
 import Link from "next/link"
 import { useAprimo } from "@/context/aprimo-context"
 
@@ -128,6 +128,17 @@ export default function Home() {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Convert a script to AI-generated audio and save it back to the DAM for review.
+                  </p>
+                </div>
+              </Link>
+              <Link href="/report-labs">
+                <div className="border border-border rounded-lg p-6 text-left bg-card hover:bg-muted/50 transition-colors cursor-pointer">
+                  <div className="flex items-center gap-3 mb-2">
+                    <FlaskConical className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">Report Labs</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Standard reports over the Analytics and Core APIs, plus an assistant that answers questions about your DAM in plain language.
                   </p>
                 </div>
               </Link>

@@ -457,6 +457,43 @@ Video Studio supports two webhook action modes:
 
 ---
 
+### Report Labs
+
+Live reporting over the Aprimo Analytics and Core APIs, plus an assistant that answers questions in plain language. Opened from the home page at `/report-labs`; no page hook required. Every query runs as the signed-in user, so Aprimo permissions apply.
+
+**Standard reports**
+
+| Report | Source | What it shows |
+|--------|--------|---------------|
+| Executive Overview | Analytics | Views, downloads, impressions, plays, active users with change vs the prior period; engagement trend; top assets |
+| Asset Performance | Analytics | Ranked assets by any metric, share of total, links into the DAM |
+| Zero Engagement | Analytics + Core | Library records with no views or downloads in the period, and a sample of recent unused assets |
+| User Adoption | Analytics | Distinct active users over time, most active users, optional breakdown by department |
+| Public Link Traffic | Analytics | Impressions and bandwidth by file, UTM keys and values |
+| Format Demand | Analytics | Downloads by rendition, crop, or version, discovered from the schema |
+| Video Performance | Analytics | Plays over time, most played assets, most engaged viewers |
+| Library Composition | Core | Records per content type, with and without files |
+| Library Growth | Core | Records created per month for 12 months with running total |
+| Content Freshness | Core | Age of the library by last modification; longest untouched records |
+| Analytics Data Model | Analytics | Every cube, measure, and dimension the schema endpoint exposes |
+
+- Global **date range** and, where supported, **collection scope**
+- Every table exports to **Excel** or **CSV**
+- Charts use a colorblind-safe palette with a table beneath each one
+
+**Assistant**
+
+The "Ask a question" panel sends the conversation to a server route that runs Claude with read-only tools: analytics schema lookup, analytics queries, record counts and searches, title resolution, content types, and collections. The user's own Aprimo token is used for every tool call. Answers stream back with tables and inline charts, and each tool call is visible in a trace under the answer.
+
+**Environment variables**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | For the assistant only | Anthropic API key, server-side. The standard reports work without it. |
+| `REPORT_LABS_MODEL` | No | Model override. Defaults to `claude-opus-5`. |
+
+---
+
 ### Team Capacity
 
 View and manage task assignments across projects using the Aprimo Productivity (PM) API. Opened directly from the home page — no page hook required.

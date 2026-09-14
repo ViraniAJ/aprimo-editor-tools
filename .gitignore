@@ -21,3 +21,4 @@ certificates
 .claude/
 .vercel
 .env*
+.agents/
