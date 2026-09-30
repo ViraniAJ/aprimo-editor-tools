@@ -544,9 +544,12 @@ function TargetLine({ target, href, hover }: { target: VersionTarget; href: stri
         <div className="h-10 w-10 rounded bg-muted border border-border shrink-0" />
       )}
       <div className="min-w-0">
-        <div className="text-xs font-medium truncate">{target.title || target.fileName}</div>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs font-medium truncate block hover:underline underline-offset-2" title="Open this record in Aprimo">
+          {target.title || target.fileName}
+        </a>
         <div className="text-[11px] text-muted-foreground truncate">
-          {target.fileName} · {formatBytes(target.fileSize)}{target.versionNumber != null ? ` · v${target.versionNumber}` : ""}{target.modifiedOn ? ` · ${new Date(target.modifiedOn).toLocaleDateString()}` : ""}
+          <a href={href} target="_blank" rel="noopener noreferrer" className="hover:underline underline-offset-2" title="Open this record in Aprimo">{target.fileName}</a>
+          {" · "}{formatBytes(target.fileSize)}{target.versionNumber != null ? ` · v${target.versionNumber}` : ""}{target.modifiedOn ? ` · ${new Date(target.modifiedOn).toLocaleDateString()}` : ""}
         </div>
       </div>
       <a href={href} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground shrink-0" title="Open in Aprimo"><ExternalLink className="w-3.5 h-3.5" /></a>
