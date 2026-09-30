@@ -252,8 +252,10 @@ export default function BulkVersioningPage() {
             Pick a classification, then drop the updated files. Each local file is matched to the record in that classification whose master file has the same or a similar name, and becomes a new version of it. Review the matches, then version them one at a time or all at once.
           </p>
 
+          {/* Steps 1 and 2 side by side on wide screens */}
+          <div className="grid gap-6 lg:grid-cols-2 mb-6 items-stretch">
           {/* Step 1: scope */}
-          <Card className="mb-6">
+          <Card className="flex flex-col">
             <CardHeader>
               <CardTitle className="text-lg">1. Records to version</CardTitle>
             </CardHeader>
@@ -261,7 +263,7 @@ export default function BulkVersioningPage() {
               <div className="space-y-1.5">
                 <Label>Classifications</Label>
                 <p className="text-xs text-muted-foreground">Tick a parent to include everything beneath it, or expand it and tick individual children. Hover a parent for &quot;this only&quot;.</p>
-                <ClassificationTreePicker nodes={allClassifications} selected={selectedIds} onChange={(next) => { setSelectedIds(next); setTargets([]); setTargetsNote(null) }} disabled={busy} />
+                <ClassificationTreePicker nodes={allClassifications} selected={selectedIds} onChange={(next) => { setSelectedIds(next); setTargets([]); setTargetsNote(null) }} disabled={busy} maxHeight={260} />
               </div>
               <div className="flex items-center gap-3">
                 <Button onClick={loadTargets} disabled={selectedIds.size === 0 || loadingTargets || busy}>
@@ -274,15 +276,15 @@ export default function BulkVersioningPage() {
           </Card>
 
           {/* Step 2: files */}
-          <Card className="mb-6">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <Card className="flex flex-col">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-lg">2. Updated files</CardTitle>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={busy}><FileIcon className="w-4 h-4" /> Add files</Button>
                 <Button variant="outline" size="sm" onClick={() => folderInputRef.current?.click()} disabled={busy}><FolderOpen className="w-4 h-4" /> Add folder</Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col flex-1 gap-4">
               <DropZone
                 isDragging={isDragging}
                 onDragOver={() => setIsDragging(true)}
@@ -291,16 +293,17 @@ export default function BulkVersioningPage() {
                 onClick={() => fileInputRef.current?.click()}
                 label="Drop the new versions here or click to browse"
                 sublabel={targets.length ? "Files are matched to records by name as you add them" : "Load records first so files can be matched as you add them"}
-                className="p-8"
+                className="p-8 flex-1 min-h-[180px]"
               />
               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
               <input ref={folderInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
-              <div className="mt-4 flex items-center gap-3">
-                <Label htmlFor="version-comment" className="text-sm whitespace-nowrap">Version comment</Label>
-                <Input id="version-comment" placeholder="Optional, stored on every new version" value={comment} onChange={(e) => setComment(e.target.value)} className="max-w-md" disabled={busy} />
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="version-comment" className="text-sm">Version comment</Label>
+                <Input id="version-comment" placeholder="Optional, stored on every new version" value={comment} onChange={(e) => setComment(e.target.value)} disabled={busy} />
               </div>
             </CardContent>
           </Card>
+          </div>
 
           {/* Step 3: review */}
           {items.length > 0 && (
