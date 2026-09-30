@@ -178,10 +178,10 @@ export default function BulkVersioningPage() {
 
   function rematch(item: LocalItem, pool: VersionTarget[]): LocalItem {
     if (item.status === "done") return item
+    // The best candidate is always pre-selected; the confidence colour tells the user how much to trust it.
     const candidates = candidatesFor(item.file.name, pool)
     const best = candidates[0]
-    const auto = !!best && best.score >= AUTO_MATCH_SCORE
-    return { ...item, candidates, targetId: auto ? best.target.recordId : null, auto, status: "pending", progress: 0, error: undefined }
+    return { ...item, candidates, targetId: best ? best.target.recordId : null, auto: !!best, status: "pending", progress: 0, error: undefined }
   }
 
   function update(uid: string, patch: Partial<LocalItem>) {
@@ -254,6 +254,7 @@ export default function BulkVersioningPage() {
   // ── Derived ────────────────────────────────────────────────────────────────
   const targetById = useMemo(() => new Map(targets.map((t) => [t.recordId, t])), [targets])
   const matched = items.filter((it) => it.targetId && it.status !== "done").length
+  const lowConfidence = items.filter((it) => it.targetId && it.status !== "done" && (it.candidates.find((c) => c.target.recordId === it.targetId)?.score ?? 100) < AUTO_MATCH_SCORE && it.candidates.find((c) => c.target.recordId === it.targetId)?.reason !== "manual").length
   const unmatched = items.filter((it) => !it.targetId && it.status !== "done").length
   const done = items.filter((it) => it.status === "done").length
   const failed = items.filter((it) => it.status === "error").length
@@ -328,7 +329,7 @@ export default function BulkVersioningPage() {
             <Card className="mb-6">
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-lg">
-                  3. Matches <span className="text-muted-foreground text-sm font-normal">{matched} ready · {unmatched} need a record · {done} done{failed ? ` · ${failed} failed` : ""}</span>
+                  3. Matches <span className="text-muted-foreground text-sm font-normal">{matched} matched{lowConfidence ? ` (${lowConfidence} low confidence)` : ""} · {unmatched} unmatched · {done} done{failed ? ` · ${failed} failed` : ""}</span>
                 </CardTitle>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setItems((prev) => prev.map((it) => rematch(it, targets)))} disabled={busy || !targets.length}><RefreshCw className="w-4 h-4" /> Re-match</Button>
@@ -397,9 +398,7 @@ export default function BulkVersioningPage() {
                           </TableCell>
                           <TableCell className="align-top">
                             {chosenCand ? (
-                              <Badge variant={chosenCand.score >= AUTO_MATCH_SCORE ? "default" : "secondary"} className="text-[10px]">{chosenCand.reason === "manual" ? "manual" : `${chosenCand.score}%${it.auto ? " auto" : ""}`}</Badge>
-                            ) : it.candidates.length ? (
-                              <Badge variant="outline" className="text-[10px]">review</Badge>
+                              <ConfidenceBadge score={chosenCand.score} manual={chosenCand.reason === "manual"} reason={chosenCand.reason} />
                             ) : null}
                           </TableCell>
                           <TableCell className="align-top">
@@ -434,7 +433,7 @@ export default function BulkVersioningPage() {
           {/* Footer actions */}
           <div className="flex items-center justify-between pt-4 border-t border-border">
             <div className="text-xs text-muted-foreground">
-              {items.length} file{items.length === 1 ? "" : "s"} · {matched} matched · {done} versioned{failed ? ` · ${failed} failed` : ""}
+              {items.length} file{items.length === 1 ? "" : "s"} · {matched} matched{lowConfidence ? <span className="text-amber-600"> · {lowConfidence} below {AUTO_MATCH_SCORE}%, check before versioning</span> : null} · {done} versioned{failed ? ` · ${failed} failed` : ""}
             </div>
             <Button onClick={versionAll} disabled={busy || matched === 0}>
               {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Versioning…</> : <><Layers className="w-4 h-4" /> Version all ({matched})</>}
@@ -477,6 +476,17 @@ function ManualSearch({ targets, query, onQuery, onPick, onClose }: { targets: V
         {targets.length > hits.length && needle === "" && <div className="text-[11px] text-muted-foreground py-1.5 px-1">Showing the first {hits.length}; type to narrow.</div>}
       </div>
     </div>
+  )
+}
+
+/** Confidence badge: green is a safe match, amber needs a glance, red is a guess. */
+function ConfidenceBadge({ score, manual, reason }: { score: number; manual: boolean; reason: string }) {
+  if (manual) return <Badge variant="outline" className="text-[10px]" title="Chosen by you">manual</Badge>
+  const cls = score >= AUTO_MATCH_SCORE ? "bg-green-600 text-white border-transparent" : score >= 60 ? "bg-amber-500 text-white border-transparent" : "bg-red-500 text-white border-transparent"
+  return (
+    <Badge className={`text-[10px] tabular-nums ${cls}`} title={reason}>
+      {score}%
+    </Badge>
   )
 }
 
