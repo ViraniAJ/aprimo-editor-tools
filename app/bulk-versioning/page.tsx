@@ -1,0 +1,459 @@
+"use client"
+
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { motion } from "framer-motion"
+import { Expander } from "aprimo-js"
+import type { Record as AprimoSDKRecord, FileVersion } from "aprimo-js/model"
+import { Loader2, Upload, Layers, FolderOpen, FileIcon, CheckCircle2, AlertCircle, Trash2, ExternalLink, RefreshCw, X } from "lucide-react"
+import { Navbar } from "@/components/navbar"
+import { Footer } from "@/components/footer"
+import { ClassificationValuePicker } from "@/components/classification-value-picker"
+import { useAprimo } from "@/context/aprimo-context"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DropZone } from "@/components/ui/drop-zone"
+import { toast } from "sonner"
+import type { ClassificationNode } from "@/models/aprimo"
+import { type VersionTarget, type Candidate, candidatesFor, AUTO_MATCH_SCORE, formatBytes } from "@/lib/bulk-versioning"
+
+// Bulk Versioning: pick a classification, drop local files (or a folder), and
+// the tool finds the record in that classification whose master file has the
+// same or a similar name. Each match can be versioned on its own, or all
+// confirmed matches at once. The local file becomes a new version of the
+// record's master file; nothing is created and nothing is deleted.
+
+type Status = "pending" | "uploading" | "versioning" | "done" | "error"
+
+interface LocalItem {
+  uid: string
+  file: File
+  relativePath: string
+  candidates: Candidate[]
+  /** Chosen target record id, or null to skip. */
+  targetId: string | null
+  auto: boolean
+  status: Status
+  progress: number
+  error?: string
+}
+
+const MAX_RECORDS = 3000
+const PAGE_SIZE = 100
+const IDS_PER_QUERY = 40
+
+function q(s: string) {
+  return s.replace(/'/g, "''")
+}
+
+export default function BulkVersioningPage() {
+  const router = useRouter()
+  const { client, isConnected, connection } = useAprimo()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+
+  const [allClassifications, setAllClassifications] = useState<ClassificationNode[]>([])
+  const [classification, setClassification] = useState<{ id: string; label: string }[]>([])
+  const [includeChildren, setIncludeChildren] = useState(true)
+  const [targets, setTargets] = useState<VersionTarget[]>([])
+  const [loadingTargets, setLoadingTargets] = useState(false)
+  const [targetsNote, setTargetsNote] = useState<string | null>(null)
+  const [items, setItems] = useState<LocalItem[]>([])
+  const [isDragging, setIsDragging] = useState(false)
+  const [comment, setComment] = useState("")
+  const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    if (!isConnected) router.replace("/")
+  }, [isConnected, router])
+
+  useEffect(() => {
+    if (!isConnected || !client) return
+    async function loadClassifications() {
+      const all: ClassificationNode[] = []
+      for await (const result of client!.classifications.getPaged(undefined, undefined, "*")) {
+        if (!result.ok) break
+        all.push(...((result.data?.items ?? []) as unknown as ClassificationNode[]))
+      }
+      setAllClassifications(all)
+    }
+    loadClassifications()
+  }, [isConnected, client])
+
+  // Folder picker: the attribute is non-standard, so set it imperatively.
+  useEffect(() => {
+    folderInputRef.current?.setAttribute("webkitdirectory", "")
+    folderInputRef.current?.setAttribute("directory", "")
+  }, [])
+
+  const classificationIds = useMemo(() => {
+    const root = classification[0]?.id
+    if (!root) return []
+    if (!includeChildren) return [root]
+    const byParent = new Map<string, string[]>()
+    for (const c of allClassifications) {
+      if (!c.parentId) continue
+      const list = byParent.get(c.parentId) ?? []
+      list.push(c.id)
+      byParent.set(c.parentId, list)
+    }
+    const out: string[] = []
+    const stack = [root]
+    while (stack.length) {
+      const id = stack.pop()!
+      out.push(id)
+      for (const child of byParent.get(id) ?? []) stack.push(child)
+    }
+    return out
+  }, [classification, includeChildren, allClassifications])
+
+  // ── Load the records in the chosen classification ──────────────────────────
+  async function loadTargets() {
+    if (!client || classificationIds.length === 0) return
+    setLoadingTargets(true)
+    setTargetsNote(null)
+    try {
+      const expander = Expander.create()
+        .for<AprimoSDKRecord>("Record").expand("masterfile", "masterfilelatestversion")
+        .for<FileVersion>("FileVersion").expand("thumbnail")
+      const found: VersionTarget[] = []
+      const seen = new Set<string>()
+      for (let i = 0; i < classificationIds.length && found.length < MAX_RECORDS; i += IDS_PER_QUERY) {
+        const expr = classificationIds.slice(i, i + IDS_PER_QUERY).map((id) => `Classification = '${q(id)}'`).join(" OR ")
+        for (let page = 1; found.length < MAX_RECORDS; page++) {
+          const r = await client.search.records({ searchExpression: { expression: expr }, page, pageSize: PAGE_SIZE }, expander)
+          if (!r.ok) throw new Error(r.error?.message ?? "Search failed")
+          const rows = ((r.data as unknown as { items?: RawRecord[] })?.items ?? [])
+          for (const rec of rows) {
+            if (seen.has(rec.id)) continue
+            seen.add(rec.id)
+            found.push(toTarget(rec))
+          }
+          if (rows.length < PAGE_SIZE) break
+        }
+      }
+      setTargets(found)
+      setTargetsNote(found.length >= MAX_RECORDS ? `Stopped at ${MAX_RECORDS} records; narrow the classification for complete matching.` : `${found.length} record${found.length === 1 ? "" : "s"} with a master file in scope.`)
+      // Re-match anything already dropped.
+      setItems((prev) => prev.map((it) => rematch(it, found)))
+    } catch (e) {
+      setTargetsNote(e instanceof Error ? e.message : "Could not load records")
+      setTargets([])
+    } finally {
+      setLoadingTargets(false)
+    }
+  }
+
+  // ── Local files ────────────────────────────────────────────────────────────
+  function addFiles(incoming: FileList | File[]) {
+    const list = Array.from(incoming).filter((f) => f.size > 0 && !f.name.startsWith("."))
+    setItems((prev) => {
+      const existing = new Set(prev.map((p) => p.relativePath))
+      const fresh = list
+        .map((file) => ({ file, relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name }))
+        .filter((f) => !existing.has(f.relativePath))
+        .map(({ file, relativePath }) =>
+          rematch({ uid: crypto.randomUUID(), file, relativePath, candidates: [], targetId: null, auto: false, status: "pending" as Status, progress: 0 }, targets),
+        )
+      return [...prev, ...fresh]
+    })
+  }
+
+  function rematch(item: LocalItem, pool: VersionTarget[]): LocalItem {
+    if (item.status === "done") return item
+    const candidates = candidatesFor(item.file.name, pool)
+    const best = candidates[0]
+    const auto = !!best && best.score >= AUTO_MATCH_SCORE
+    return { ...item, candidates, targetId: auto ? best.target.recordId : null, auto, status: "pending", progress: 0, error: undefined }
+  }
+
+  function update(uid: string, patch: Partial<LocalItem>) {
+    setItems((prev) => prev.map((it) => (it.uid === uid ? { ...it, ...patch } : it)))
+  }
+
+  // ── Versioning ─────────────────────────────────────────────────────────────
+  async function versionOne(item: LocalItem): Promise<boolean> {
+    if (!client) return false
+    const target = item.candidates.find((c) => c.target.recordId === item.targetId)?.target
+    if (!target) return false
+    if (!target.fileId) {
+      update(item.uid, { status: "error", error: "Record has no master file id; cannot add a version" })
+      return false
+    }
+    try {
+      update(item.uid, { status: "uploading", progress: 0, error: undefined })
+      const uploadResult = await client.uploader.uploadFile(item.file, {
+        parallelLimit: 4,
+        onProgress: (uploaded, total) => update(item.uid, { progress: total > 0 ? Math.round((uploaded / total) * 100) : 0 }),
+      })
+      const token = (uploadResult.data as unknown as { token?: string } | undefined)?.token
+      if (!uploadResult.ok || !token) throw new Error(uploadResult.error?.message ?? "Upload failed")
+      update(item.uid, { status: "versioning", progress: 100 })
+      const version: { id: string; fileName: string; comment?: string } = { id: token, fileName: item.file.name }
+      if (comment.trim()) version.comment = comment.trim()
+      const r = await client.records.update(target.recordId, {
+        files: { addOrUpdate: [{ id: target.fileId, versions: { addOrUpdate: [version] } }] },
+      })
+      if (!r.ok) throw new Error(r.error?.message ?? "Record update failed")
+      update(item.uid, { status: "done" })
+      return true
+    } catch (e) {
+      update(item.uid, { status: "error", error: e instanceof Error ? e.message : "Unknown error" })
+      return false
+    }
+  }
+
+  async function versionAll() {
+    const todo = items.filter((it) => it.targetId && it.status !== "done" && it.status !== "uploading" && it.status !== "versioning")
+    if (!todo.length) {
+      toast.error("No confirmed matches to version")
+      return
+    }
+    setRunning(true)
+    let ok = 0
+    for (const it of todo) if (await versionOne(it)) ok++
+    setRunning(false)
+    toast[ok === todo.length ? "success" : "warning"](`${ok} of ${todo.length} versioned`)
+  }
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const targetById = useMemo(() => new Map(targets.map((t) => [t.recordId, t])), [targets])
+  const matched = items.filter((it) => it.targetId && it.status !== "done").length
+  const unmatched = items.filter((it) => !it.targetId && it.status !== "done").length
+  const done = items.filter((it) => it.status === "done").length
+  const failed = items.filter((it) => it.status === "error").length
+  const busy = running || items.some((it) => it.status === "uploading" || it.status === "versioning")
+  const damUrl = (recordId: string) => `https://${connection?.environment}.dam.aprimo.com/dam/contentitems/${recordId.replace(/-/g, "")}`
+  // A record chosen by more than one local file would get several versions in a row; flag it.
+  const targetUse = new Map<string, number>()
+  for (const it of items) if (it.targetId && it.status !== "done") targetUse.set(it.targetId, (targetUse.get(it.targetId) ?? 0) + 1)
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <Navbar />
+      <main className="flex-1 w-full px-6 py-10">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+          <p className="text-muted-foreground mb-8 max-w-3xl">
+            Pick a classification, then drop the updated files. Each local file is matched to the record in that classification whose master file has the same or a similar name, and becomes a new version of it. Review the matches, then version them one at a time or all at once.
+          </p>
+
+          {/* Step 1: scope */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">1. Records to version</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-end">
+                <div className="space-y-1.5">
+                  <Label>Classification</Label>
+                  <ClassificationValuePicker rootId={null} acceptMultiple={false} allClassifications={allClassifications} value={classification} onChange={(next) => { setClassification(next); setTargets([]); setTargetsNote(null) }} disabled={busy} />
+                </div>
+                <label className="flex items-center gap-2 text-sm pb-2">
+                  <Checkbox checked={includeChildren} onCheckedChange={(v) => setIncludeChildren(!!v)} disabled={busy} /> Include child classifications
+                </label>
+                <Button onClick={loadTargets} disabled={!classification.length || loadingTargets || busy}>
+                  {loadingTargets ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading…</> : <><RefreshCw className="w-4 h-4" /> Load records</>}
+                </Button>
+              </div>
+              {targetsNote && <p className="text-xs text-muted-foreground">{targetsNote}{classificationIds.length > 1 && includeChildren ? ` Searched ${classificationIds.length} classifications.` : ""}</p>}
+            </CardContent>
+          </Card>
+
+          {/* Step 2: files */}
+          <Card className="mb-6">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-lg">2. Updated files</CardTitle>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={busy}><FileIcon className="w-4 h-4" /> Add files</Button>
+                <Button variant="outline" size="sm" onClick={() => folderInputRef.current?.click()} disabled={busy}><FolderOpen className="w-4 h-4" /> Add folder</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <DropZone
+                isDragging={isDragging}
+                onDragOver={() => setIsDragging(true)}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => { setIsDragging(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files) }}
+                onClick={() => fileInputRef.current?.click()}
+                label="Drop the new versions here or click to browse"
+                sublabel={targets.length ? "Files are matched to records by name as you add them" : "Load records first so files can be matched as you add them"}
+                className="p-8"
+              />
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
+              <input ref={folderInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
+              <div className="mt-4 flex items-center gap-3">
+                <Label htmlFor="version-comment" className="text-sm whitespace-nowrap">Version comment</Label>
+                <Input id="version-comment" placeholder="Optional, stored on every new version" value={comment} onChange={(e) => setComment(e.target.value)} className="max-w-md" disabled={busy} />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Step 3: review */}
+          {items.length > 0 && (
+            <Card className="mb-6">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-lg">
+                  3. Matches <span className="text-muted-foreground text-sm font-normal">{matched} ready · {unmatched} need a record · {done} done{failed ? ` · ${failed} failed` : ""}</span>
+                </CardTitle>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setItems((prev) => prev.map((it) => rematch(it, targets)))} disabled={busy || !targets.length}><RefreshCw className="w-4 h-4" /> Re-match</Button>
+                  <Button variant="outline" size="sm" onClick={() => setItems([])} disabled={busy}><Trash2 className="w-4 h-4" /> Clear</Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Local file</TableHead>
+                      <TableHead>Record to version</TableHead>
+                      <TableHead className="w-[110px]">Match</TableHead>
+                      <TableHead className="w-[150px]">Status</TableHead>
+                      <TableHead className="w-[120px] text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((it) => {
+                      const chosen = it.targetId ? targetById.get(it.targetId) : undefined
+                      const chosenCand = it.candidates.find((c) => c.target.recordId === it.targetId)
+                      const dup = it.targetId ? (targetUse.get(it.targetId) ?? 0) > 1 : false
+                      const sameSize = chosen?.fileSize != null && chosen.fileSize === it.file.size && chosen.fileName.toLowerCase() === it.file.name.toLowerCase()
+                      return (
+                        <TableRow key={it.uid}>
+                          <TableCell className="align-top">
+                            <div className="text-sm font-medium break-all">{it.file.name}</div>
+                            <div className="text-xs text-muted-foreground">{formatBytes(it.file.size)}{it.relativePath !== it.file.name ? ` · ${it.relativePath}` : ""}</div>
+                          </TableCell>
+                          <TableCell className="align-top">
+                            {it.status === "done" && chosen ? (
+                              <TargetLine target={chosen} href={damUrl(chosen.recordId)} />
+                            ) : it.candidates.length ? (
+                              <div className="flex flex-col gap-1.5">
+                                <Select value={it.targetId ?? "__skip"} onValueChange={(v) => update(it.uid, { targetId: v === "__skip" ? null : v, auto: false, status: "pending", error: undefined })} disabled={busy}>
+                                  <SelectTrigger className="h-8 text-xs max-w-md"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__skip" className="text-xs">Skip this file</SelectItem>
+                                    {it.candidates.map((c) => (
+                                      <SelectItem key={c.target.recordId} value={c.target.recordId} className="text-xs">
+                                        {c.target.fileName} · {c.score}% {c.reason}{c.target.title && c.target.title !== c.target.fileName ? ` · ${c.target.title}` : ""}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {chosen && <TargetLine target={chosen} href={damUrl(chosen.recordId)} />}
+                                {dup && <span className="text-[11px] text-amber-600">Another local file also targets this record; both would become versions.</span>}
+                                {sameSize && <span className="text-[11px] text-amber-600">Same name and size as the current version; it may already be up to date.</span>}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{targets.length ? "No similar file name in this classification" : "Load records to match"}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            {chosenCand ? (
+                              <Badge variant={chosenCand.score >= AUTO_MATCH_SCORE ? "default" : "secondary"} className="text-[10px]">{chosenCand.score}%{it.auto ? " auto" : ""}</Badge>
+                            ) : it.candidates.length ? (
+                              <Badge variant="outline" className="text-[10px]">review</Badge>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            {it.status === "pending" && <span className="text-xs text-muted-foreground">{it.targetId ? "Ready" : "Skipped"}</span>}
+                            {(it.status === "uploading" || it.status === "versioning") && (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {it.status === "uploading" ? `Uploading ${it.progress}%` : "Adding version…"}</span>
+                                <Progress value={it.progress} className="h-1" />
+                              </div>
+                            )}
+                            {it.status === "done" && <span className="text-xs flex items-center gap-1 text-green-600"><CheckCircle2 className="w-3.5 h-3.5" /> New version added</span>}
+                            {it.status === "error" && <span className="text-xs flex items-start gap-1 text-destructive"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {it.error}</span>}
+                          </TableCell>
+                          <TableCell className="align-top text-right">
+                            {it.status === "done" ? (
+                              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setItems((prev) => prev.filter((p) => p.uid !== it.uid))}><X className="w-3.5 h-3.5" /></Button>
+                            ) : (
+                              <Button size="sm" className="h-7 text-xs" onClick={() => versionOne(it)} disabled={!it.targetId || busy}>
+                                <Upload className="w-3.5 h-3.5" /> {it.status === "error" ? "Retry" : "Version"}
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Footer actions */}
+          <div className="flex items-center justify-between pt-4 border-t border-border">
+            <div className="text-xs text-muted-foreground">
+              {items.length} file{items.length === 1 ? "" : "s"} · {matched} matched · {done} versioned{failed ? ` · ${failed} failed` : ""}
+            </div>
+            <Button onClick={versionAll} disabled={busy || matched === 0}>
+              {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Versioning…</> : <><Layers className="w-4 h-4" /> Version all ({matched})</>}
+            </Button>
+          </div>
+        </motion.div>
+      </main>
+      <Footer />
+    </div>
+  )
+}
+
+function TargetLine({ target, href }: { target: VersionTarget; href: string }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      {target.thumbnailUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={target.thumbnailUrl} alt="" className="h-8 w-8 rounded object-cover border border-border shrink-0" />
+      ) : (
+        <div className="h-8 w-8 rounded bg-muted border border-border shrink-0" />
+      )}
+      <div className="min-w-0">
+        <div className="text-xs font-medium truncate">{target.title || target.fileName}</div>
+        <div className="text-[11px] text-muted-foreground truncate">
+          {target.fileName} · {formatBytes(target.fileSize)}{target.versionNumber != null ? ` · v${target.versionNumber}` : ""}{target.modifiedOn ? ` · ${new Date(target.modifiedOn).toLocaleDateString()}` : ""}
+        </div>
+      </div>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground shrink-0" title="Open in Aprimo"><ExternalLink className="w-3.5 h-3.5" /></a>
+    </div>
+  )
+}
+
+// ── Record shape as returned by the search with our expansions ───────────────
+interface RawRecord {
+  id: string
+  title?: string | null
+  modifiedOn?: string
+  _embedded?: {
+    masterfile?: { id?: string }
+    masterfilelatestversion?: {
+      id?: string
+      fileName?: string
+      fileSize?: number
+      versionNumber?: number
+      createdOn?: string
+      _embedded?: { thumbnail?: { uri?: string } }
+    }
+  }
+}
+
+function toTarget(rec: RawRecord): VersionTarget {
+  const v = rec._embedded?.masterfilelatestversion
+  return {
+    recordId: rec.id,
+    title: rec.title ?? "",
+    fileName: v?.fileName ?? "",
+    fileId: rec._embedded?.masterfile?.id ?? null,
+    fileSize: v?.fileSize ?? null,
+    versionNumber: v?.versionNumber ?? null,
+    modifiedOn: v?.createdOn ?? rec.modifiedOn ?? null,
+    thumbnailUrl: v?._embedded?.thumbnail?.uri ?? null,
+  }
+}

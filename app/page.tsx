@@ -3,7 +3,7 @@
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
-import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users, FlaskConical } from "lucide-react"
+import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users, FlaskConical, Layers } from "lucide-react"
 import Link from "next/link"
 import { useAprimo } from "@/context/aprimo-context"
 
@@ -84,6 +84,17 @@ export default function Home() {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Upload files into Aprimo with shared or per-asset field values.
+                  </p>
+                </div>
+              </Link>
+              <Link href="/bulk-versioning">
+                <div className="border border-border rounded-lg p-6 text-left bg-card hover:bg-muted/50 transition-colors cursor-pointer">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Layers className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">Bulk Versioning</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Drop updated files or a folder, match them to records in a classification by file name, and add each as a new version.
                   </p>
                 </div>
               </Link>
