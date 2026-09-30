@@ -23,6 +23,7 @@ import { DropZone } from "@/components/ui/drop-zone"
 import { toast } from "sonner"
 import type { ClassificationNode } from "@/models/aprimo"
 import { type VersionTarget, type Candidate, candidatesFor, AUTO_MATCH_SCORE, formatBytes } from "@/lib/bulk-versioning"
+import { type PickedFile, filesFromDrop, filesFromInput, isUsable } from "@/lib/dropped-files"
 
 // Bulk Versioning: pick a classification, drop local files (or a folder), and
 // the tool finds the record in that classification whose master file has the
@@ -73,6 +74,7 @@ export default function BulkVersioningPage() {
   const [items, setItems] = useState<LocalItem[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [comment, setComment] = useState("")
+  const [reading, setReading] = useState(false)
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
@@ -138,21 +140,43 @@ export default function BulkVersioningPage() {
   }
 
   // ── Local files ────────────────────────────────────────────────────────────
-  function addFiles(incoming: FileList | File[]) {
-    const list = Array.from(incoming).filter((f) => f.size > 0 && !f.name.startsWith("."))
+  function addFiles(incoming: PickedFile[]) {
+    const usable = incoming.filter(isUsable)
+    const existing = new Set(items.map((p) => p.relativePath))
+    const fresh = usable
+      .filter((f) => !existing.has(f.relativePath))
+      .map(({ file, relativePath }) =>
+        rematch(
+          { uid: crypto.randomUUID(), file, relativePath, previewUrl: BROWSER_IMAGE_TYPES.has(file.type) ? URL.createObjectURL(file) : null, candidates: [], targetId: null, auto: false, status: "pending" as Status, progress: 0 },
+          targets,
+        ),
+      )
+    const skipped = incoming.length - fresh.length
+    if (!fresh.length) {
+      toast.message(incoming.length ? "Those files are already in the list" : "No files found")
+      return
+    }
     setItems((prev) => {
-      const existing = new Set(prev.map((p) => p.relativePath))
-      const fresh = list
-        .map((file) => ({ file, relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name }))
-        .filter((f) => !existing.has(f.relativePath))
-        .map(({ file, relativePath }) =>
-          rematch(
-            { uid: crypto.randomUUID(), file, relativePath, previewUrl: BROWSER_IMAGE_TYPES.has(file.type) ? URL.createObjectURL(file) : null, candidates: [], targetId: null, auto: false, status: "pending" as Status, progress: 0 },
-            targets,
-          ),
-        )
-      return [...prev, ...fresh]
+      const seen = new Set(prev.map((p) => p.relativePath))
+      return [...prev, ...fresh.filter((f) => !seen.has(f.relativePath))]
     })
+    const withMatch = fresh.filter((f) => f.targetId).length
+    toast.success(
+      `Added ${fresh.length} file${fresh.length === 1 ? "" : "s"}` +
+        (targets.length ? `, ${withMatch} matched` : "") +
+        (skipped ? `. Skipped ${skipped} duplicate, hidden, or empty` : ""),
+    )
+  }
+
+  async function onDropFiles(dt: DataTransfer) {
+    setReading(true)
+    try {
+      addFiles(await filesFromDrop(dt))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read the dropped files")
+    } finally {
+      setReading(false)
+    }
   }
 
   function rematch(item: LocalItem, pool: VersionTarget[]): LocalItem {
@@ -289,14 +313,52 @@ export default function BulkVersioningPage() {
                 isDragging={isDragging}
                 onDragOver={() => setIsDragging(true)}
                 onDragLeave={() => setIsDragging(false)}
-                onDrop={(e) => { setIsDragging(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files) }}
+                onDrop={(e) => { setIsDragging(false); onDropFiles(e.dataTransfer) }}
                 onClick={() => fileInputRef.current?.click()}
-                label="Drop the new versions here or click to browse"
+                label={reading ? "Reading files…" : "Drop files or a folder here, or click to browse"}
                 sublabel={targets.length ? "Files are matched to records by name as you add them" : "Load records first so files can be matched as you add them"}
-                className="p-8 flex-1 min-h-[180px]"
+                className={items.length ? "p-4" : "p-8 flex-1 min-h-[180px]"}
               />
-              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
-              <input ref={folderInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = "" }} />
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(filesFromInput(e.target.files)); e.target.value = "" }} />
+              <input ref={folderInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(filesFromInput(e.target.files)); e.target.value = "" }} />
+              {items.length > 0 && (
+                <div className="rounded-md border border-border">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 border-b border-border text-xs">
+                    <span className="font-medium">{items.length} file{items.length === 1 ? "" : "s"} added</span>
+                    <span className="text-muted-foreground">{formatBytes(items.reduce((a, it) => a + it.file.size, 0))}</span>
+                    {targets.length > 0 && <span className="text-muted-foreground">{items.filter((it) => it.targetId).length} matched · {items.filter((it) => !it.targetId).length} unmatched</span>}
+                    <span className="ml-auto flex items-center gap-2">
+                      <button onClick={() => document.getElementById("bv-matches")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="underline underline-offset-2 text-muted-foreground hover:text-foreground">Review matches</button>
+                      <button onClick={() => removeItems(() => false)} className="underline underline-offset-2 text-muted-foreground hover:text-foreground" disabled={busy}>Clear</button>
+                    </span>
+                  </div>
+                  <ul className="max-h-40 overflow-y-auto divide-y divide-border">
+                    {items.map((it) => {
+                      const cand = it.candidates.find((c) => c.target.recordId === it.targetId)
+                      const tone = it.status === "done" ? "bg-green-600" : !cand ? "bg-muted-foreground/40" : cand.reason === "manual" || cand.score >= AUTO_MATCH_SCORE ? "bg-green-600" : cand.score >= 60 ? "bg-amber-500" : "bg-red-500"
+                      const note = it.status === "done" ? "versioned" : it.status === "error" ? "failed" : !targets.length ? "not matched yet" : cand ? (cand.reason === "manual" ? "manual" : `${cand.score}%`) : "no match"
+                      return (
+                        <li key={it.uid} className="flex items-center gap-2 px-3 py-1 text-xs">
+                          {it.previewUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={it.previewUrl} alt="" className="h-6 w-6 rounded object-cover border border-border shrink-0" />
+                          ) : (
+                            <FileIcon className="h-4 w-4 mx-1 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="truncate min-w-0 flex-1" title={it.relativePath}>{it.relativePath}</span>
+                          <span className="text-muted-foreground shrink-0">{formatBytes(it.file.size)}</span>
+                          <span className="flex items-center gap-1 shrink-0 w-[92px] justify-end">
+                            <span className={`h-1.5 w-1.5 rounded-full ${tone}`} />
+                            <span className="text-muted-foreground">{note}</span>
+                          </span>
+                          <button onClick={() => removeItems((p) => p.uid !== it.uid)} className="text-muted-foreground hover:text-foreground shrink-0" disabled={busy || it.status === "uploading" || it.status === "versioning"} title="Remove"><X className="h-3.5 w-3.5" /></button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  <p className="px-3 py-1.5 border-t border-border text-[11px] text-muted-foreground">Nothing is sent to Aprimo until you click Version or Version all.</p>
+                </div>
+              )}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="version-comment" className="text-sm">Version comment</Label>
                 <Input id="version-comment" placeholder="Optional, stored on every new version" value={comment} onChange={(e) => setComment(e.target.value)} disabled={busy} />
@@ -307,7 +369,7 @@ export default function BulkVersioningPage() {
 
           {/* Step 3: review */}
           {items.length > 0 && (
-            <Card className="mb-6">
+            <Card className="mb-6 scroll-mt-20" id="bv-matches">
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-lg">
                   3. Matches <span className="text-muted-foreground text-sm font-normal">{matched} matched{lowConfidence ? ` (${lowConfidence} low confidence)` : ""} · {unmatched} unmatched · {done} done{failed ? ` · ${failed} failed` : ""}</span>
