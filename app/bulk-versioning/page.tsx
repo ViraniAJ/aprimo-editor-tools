@@ -8,7 +8,7 @@ import type { Record as AprimoSDKRecord, FileVersion } from "aprimo-js/model"
 import { Loader2, Upload, Layers, FolderOpen, FileIcon, CheckCircle2, AlertCircle, Trash2, ExternalLink, RefreshCw, X } from "lucide-react"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { ClassificationValuePicker } from "@/components/classification-value-picker"
+import { ClassificationTreePicker } from "@/components/classification-tree-picker"
 import { useAprimo } from "@/context/aprimo-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
@@ -67,8 +66,7 @@ export default function BulkVersioningPage() {
   const folderInputRef = useRef<HTMLInputElement>(null)
 
   const [allClassifications, setAllClassifications] = useState<ClassificationNode[]>([])
-  const [classification, setClassification] = useState<{ id: string; label: string }[]>([])
-  const [includeChildren, setIncludeChildren] = useState(true)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [targets, setTargets] = useState<VersionTarget[]>([])
   const [loadingTargets, setLoadingTargets] = useState(false)
   const [targetsNote, setTargetsNote] = useState<string | null>(null)
@@ -100,26 +98,7 @@ export default function BulkVersioningPage() {
     folderInputRef.current?.setAttribute("directory", "")
   }, [])
 
-  const classificationIds = useMemo(() => {
-    const root = classification[0]?.id
-    if (!root) return []
-    if (!includeChildren) return [root]
-    const byParent = new Map<string, string[]>()
-    for (const c of allClassifications) {
-      if (!c.parentId) continue
-      const list = byParent.get(c.parentId) ?? []
-      list.push(c.id)
-      byParent.set(c.parentId, list)
-    }
-    const out: string[] = []
-    const stack = [root]
-    while (stack.length) {
-      const id = stack.pop()!
-      out.push(id)
-      for (const child of byParent.get(id) ?? []) stack.push(child)
-    }
-    return out
-  }, [classification, includeChildren, allClassifications])
+  const classificationIds = useMemo(() => Array.from(selectedIds), [selectedIds])
 
   // ── Load the records in the chosen classification ──────────────────────────
   async function loadTargets() {
@@ -279,19 +258,18 @@ export default function BulkVersioningPage() {
               <CardTitle className="text-lg">1. Records to version</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <div className="grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-end">
-                <div className="space-y-1.5">
-                  <Label>Classification</Label>
-                  <ClassificationValuePicker rootId={null} acceptMultiple={false} allClassifications={allClassifications} value={classification} onChange={(next) => { setClassification(next); setTargets([]); setTargetsNote(null) }} disabled={busy} />
-                </div>
-                <label className="flex items-center gap-2 text-sm pb-2">
-                  <Checkbox checked={includeChildren} onCheckedChange={(v) => setIncludeChildren(!!v)} disabled={busy} /> Include child classifications
-                </label>
-                <Button onClick={loadTargets} disabled={!classification.length || loadingTargets || busy}>
+              <div className="space-y-1.5">
+                <Label>Classifications</Label>
+                <p className="text-xs text-muted-foreground">Tick a parent to include everything beneath it, or expand it and tick individual children. Hover a parent for &quot;this only&quot;.</p>
+                <ClassificationTreePicker nodes={allClassifications} selected={selectedIds} onChange={(next) => { setSelectedIds(next); setTargets([]); setTargetsNote(null) }} disabled={busy} />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button onClick={loadTargets} disabled={selectedIds.size === 0 || loadingTargets || busy}>
                   {loadingTargets ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading…</> : <><RefreshCw className="w-4 h-4" /> Load records</>}
                 </Button>
+                <span className="text-xs text-muted-foreground">{selectedIds.size === 0 ? "Select at least one classification." : `${selectedIds.size} classification${selectedIds.size === 1 ? "" : "s"} in scope.`}</span>
               </div>
-              {targetsNote && <p className="text-xs text-muted-foreground">{targetsNote}{classificationIds.length > 1 && includeChildren ? ` Searched ${classificationIds.length} classifications.` : ""}</p>}
+              {targetsNote && <p className="text-xs text-muted-foreground">{targetsNote}</p>}
             </CardContent>
           </Card>
 
