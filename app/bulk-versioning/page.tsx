@@ -356,7 +356,7 @@ export default function BulkVersioningPage() {
                         <TableRow key={it.uid}>
                           <TableCell className="align-top">
                             <div className="flex items-start gap-2 min-w-0">
-                              <Thumb src={it.previewUrl} large={it.previewUrl} caption={`${it.file.name} · ${formatBytes(it.file.size)} · local`} />
+                              <Thumb src={it.previewUrl}><ComparePreview item={it} target={chosen ?? null} /></Thumb>
                               <div className="min-w-0">
                                 <div className="text-sm font-medium break-all">{it.file.name}</div>
                                 <div className="text-xs text-muted-foreground">{formatBytes(it.file.size)}{it.relativePath !== it.file.name ? ` · ${it.relativePath}` : ""}</div>
@@ -365,7 +365,7 @@ export default function BulkVersioningPage() {
                           </TableCell>
                           <TableCell className="align-top">
                             {it.status === "done" && chosen ? (
-                              <TargetLine target={chosen} href={damUrl(chosen.recordId)} />
+                              <TargetLine target={chosen} href={damUrl(chosen.recordId)} hover={<ComparePreview item={it} target={chosen} />} />
                             ) : (
                               <div className="flex flex-col gap-1.5">
                                 {it.candidates.length > 0 && (
@@ -381,7 +381,7 @@ export default function BulkVersioningPage() {
                                     </SelectContent>
                                   </Select>
                                 )}
-                                {chosen && <TargetLine target={chosen} href={damUrl(chosen.recordId)} />}
+                                {chosen && <TargetLine target={chosen} href={damUrl(chosen.recordId)} hover={<ComparePreview item={it} target={chosen} />} />}
                                 {!it.candidates.length && <span className="text-xs text-muted-foreground">{targets.length ? "No similar file name in this classification." : "Load records to match."}</span>}
                                 {targets.length > 0 && it.search === undefined ? (
                                   <button onClick={() => update(it.uid, { search: "" })} className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground text-left w-fit" disabled={busy}>
@@ -480,28 +480,59 @@ function ManualSearch({ targets, query, onQuery, onPick, onClose }: { targets: V
   )
 }
 
-/** Small thumbnail that expands on hover. Falls back to a blank tile when there is nothing to show. */
-function Thumb({ src, large, caption }: { src: string | null; large: string | null; caption: string }) {
-  if (!src) return <div className="h-10 w-10 rounded bg-muted border border-border shrink-0 flex items-center justify-center"><FileIcon className="w-4 h-4 text-muted-foreground" /></div>
+/** Side-by-side of what is in Aprimo now and what would replace it. */
+function ComparePreview({ item, target }: { item: LocalItem; target: VersionTarget | null }) {
+  const pane = (label: string, src: string | null, caption: string, tone: "current" | "proposed") => (
+    <div className="flex flex-col gap-1.5 min-w-0 w-[280px]">
+      <div className={`text-[11px] uppercase tracking-[0.12em] ${tone === "proposed" ? "text-primary" : "text-muted-foreground"}`}>{label}</div>
+      <div className="h-[220px] rounded border border-border bg-muted flex items-center justify-center overflow-hidden">
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="" className="max-w-full max-h-full object-contain" />
+        ) : (
+          <span className="text-xs text-muted-foreground px-3 text-center">No preview for this file type</span>
+        )}
+      </div>
+      <div className="text-[11px] text-muted-foreground break-all leading-snug">{caption}</div>
+    </div>
+  )
+  return (
+    <div className="flex gap-3">
+      {target
+        ? pane("Current version in Aprimo", target.previewUrl ?? target.thumbnailUrl, `${target.fileName} · ${formatBytes(target.fileSize)}${target.versionNumber != null ? ` · v${target.versionNumber}` : ""}${target.modifiedOn ? ` · ${new Date(target.modifiedOn).toLocaleDateString()}` : ""}`, "current")
+        : pane("Current version in Aprimo", null, "No record chosen yet", "current")}
+      {pane("Proposed new version", item.previewUrl, `${item.file.name} · ${formatBytes(item.file.size)} · ${new Date(item.file.lastModified).toLocaleDateString()} · local`, "proposed")}
+    </div>
+  )
+}
+
+/** Small thumbnail; hovering shows the comparison card passed as children. */
+function Thumb({ src, children }: { src: string | null; children: React.ReactNode }) {
+  const trigger = src ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" className="h-10 w-10 rounded object-cover border border-border shrink-0 cursor-zoom-in bg-muted" />
+  ) : (
+    <div className="h-10 w-10 rounded bg-muted border border-border shrink-0 flex items-center justify-center cursor-zoom-in"><FileIcon className="w-4 h-4 text-muted-foreground" /></div>
+  )
   return (
     <HoverCard openDelay={150} closeDelay={80}>
-      <HoverCardTrigger asChild>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt="" className="h-10 w-10 rounded object-cover border border-border shrink-0 cursor-zoom-in bg-muted" />
-      </HoverCardTrigger>
-      <HoverCardContent side="right" align="start" className="w-auto p-2">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={large ?? src} alt="" className="max-w-[420px] max-h-[360px] w-auto h-auto rounded object-contain bg-muted" />
-        <div className="mt-1.5 text-[11px] text-muted-foreground max-w-[420px] break-all">{caption}</div>
-      </HoverCardContent>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardContent side="right" align="start" className="w-auto p-3">{children}</HoverCardContent>
     </HoverCard>
   )
 }
 
-function TargetLine({ target, href }: { target: VersionTarget; href: string }) {
+function TargetLine({ target, href, hover }: { target: VersionTarget; href: string; hover?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 min-w-0">
-      <Thumb src={target.thumbnailUrl} large={target.previewUrl ?? target.thumbnailUrl} caption={`${target.fileName} · ${formatBytes(target.fileSize)}${target.versionNumber != null ? ` · v${target.versionNumber}` : ""} · in Aprimo`} />
+      {hover ? (
+        <Thumb src={target.thumbnailUrl}>{hover}</Thumb>
+      ) : target.thumbnailUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={target.thumbnailUrl} alt="" className="h-10 w-10 rounded object-cover border border-border shrink-0" />
+      ) : (
+        <div className="h-10 w-10 rounded bg-muted border border-border shrink-0" />
+      )}
       <div className="min-w-0">
         <div className="text-xs font-medium truncate">{target.title || target.fileName}</div>
         <div className="text-[11px] text-muted-foreground truncate">
