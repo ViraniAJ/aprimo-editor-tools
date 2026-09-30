@@ -10,6 +10,8 @@ export interface VersionTarget {
   versionNumber: number | null
   modifiedOn: string | null
   thumbnailUrl: string | null
+  /** Larger rendition for the hover preview, when Aprimo has one. */
+  previewUrl: string | null
 }
 
 export interface Candidate {

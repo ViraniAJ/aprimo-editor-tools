@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { DropZone } from "@/components/ui/drop-zone"
 import { toast } from "sonner"
 import type { ClassificationNode } from "@/models/aprimo"
@@ -32,10 +33,14 @@ import { type VersionTarget, type Candidate, candidatesFor, AUTO_MATCH_SCORE, fo
 
 type Status = "pending" | "uploading" | "versioning" | "done" | "error"
 
+const BROWSER_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif", "image/bmp"])
+
 interface LocalItem {
   uid: string
   file: File
   relativePath: string
+  /** Object URL for browser-renderable images; revoked when the row goes away. */
+  previewUrl: string | null
   candidates: Candidate[]
   /** Chosen target record id, or null to skip. */
   targetId: string | null
@@ -122,7 +127,7 @@ export default function BulkVersioningPage() {
     try {
       const expander = Expander.create()
         .for<AprimoSDKRecord>("Record").expand("masterfile", "masterfilelatestversion")
-        .for<FileVersion>("FileVersion").expand("thumbnail")
+        .for<FileVersion>("FileVersion").expand("thumbnail", "preview")
       const found: VersionTarget[] = []
       const seen = new Set<string>()
       for (let i = 0; i < classificationIds.length && found.length < MAX_RECORDS; i += IDS_PER_QUERY) {
@@ -160,7 +165,10 @@ export default function BulkVersioningPage() {
         .map((file) => ({ file, relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name }))
         .filter((f) => !existing.has(f.relativePath))
         .map(({ file, relativePath }) =>
-          rematch({ uid: crypto.randomUUID(), file, relativePath, candidates: [], targetId: null, auto: false, status: "pending" as Status, progress: 0 }, targets),
+          rematch(
+            { uid: crypto.randomUUID(), file, relativePath, previewUrl: BROWSER_IMAGE_TYPES.has(file.type) ? URL.createObjectURL(file) : null, candidates: [], targetId: null, auto: false, status: "pending" as Status, progress: 0 },
+            targets,
+          ),
         )
       return [...prev, ...fresh]
     })
@@ -176,6 +184,13 @@ export default function BulkVersioningPage() {
 
   function update(uid: string, patch: Partial<LocalItem>) {
     setItems((prev) => prev.map((it) => (it.uid === uid ? { ...it, ...patch } : it)))
+  }
+
+  function removeItems(keep: (it: LocalItem) => boolean) {
+    setItems((prev) => {
+      for (const it of prev) if (!keep(it) && it.previewUrl) URL.revokeObjectURL(it.previewUrl)
+      return prev.filter(keep)
+    })
   }
 
   // ── Versioning ─────────────────────────────────────────────────────────────
@@ -304,7 +319,7 @@ export default function BulkVersioningPage() {
                 </CardTitle>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setItems((prev) => prev.map((it) => rematch(it, targets)))} disabled={busy || !targets.length}><RefreshCw className="w-4 h-4" /> Re-match</Button>
-                  <Button variant="outline" size="sm" onClick={() => setItems([])} disabled={busy}><Trash2 className="w-4 h-4" /> Clear</Button>
+                  <Button variant="outline" size="sm" onClick={() => removeItems(() => false)} disabled={busy}><Trash2 className="w-4 h-4" /> Clear</Button>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -327,8 +342,13 @@ export default function BulkVersioningPage() {
                       return (
                         <TableRow key={it.uid}>
                           <TableCell className="align-top">
-                            <div className="text-sm font-medium break-all">{it.file.name}</div>
-                            <div className="text-xs text-muted-foreground">{formatBytes(it.file.size)}{it.relativePath !== it.file.name ? ` · ${it.relativePath}` : ""}</div>
+                            <div className="flex items-start gap-2 min-w-0">
+                              <Thumb src={it.previewUrl} large={it.previewUrl} caption={`${it.file.name} · ${formatBytes(it.file.size)} · local`} />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium break-all">{it.file.name}</div>
+                                <div className="text-xs text-muted-foreground">{formatBytes(it.file.size)}{it.relativePath !== it.file.name ? ` · ${it.relativePath}` : ""}</div>
+                              </div>
+                            </div>
                           </TableCell>
                           <TableCell className="align-top">
                             {it.status === "done" && chosen ? (
@@ -374,7 +394,7 @@ export default function BulkVersioningPage() {
                           </TableCell>
                           <TableCell className="align-top text-right">
                             {it.status === "done" ? (
-                              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setItems((prev) => prev.filter((p) => p.uid !== it.uid))}><X className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => removeItems((p) => p.uid !== it.uid)}><X className="w-3.5 h-3.5" /></Button>
                             ) : (
                               <Button size="sm" className="h-7 text-xs" onClick={() => versionOne(it)} disabled={!it.targetId || busy}>
                                 <Upload className="w-3.5 h-3.5" /> {it.status === "error" ? "Retry" : "Version"}
@@ -406,15 +426,28 @@ export default function BulkVersioningPage() {
   )
 }
 
+/** Small thumbnail that expands on hover. Falls back to a blank tile when there is nothing to show. */
+function Thumb({ src, large, caption }: { src: string | null; large: string | null; caption: string }) {
+  if (!src) return <div className="h-10 w-10 rounded bg-muted border border-border shrink-0 flex items-center justify-center"><FileIcon className="w-4 h-4 text-muted-foreground" /></div>
+  return (
+    <HoverCard openDelay={150} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" className="h-10 w-10 rounded object-cover border border-border shrink-0 cursor-zoom-in bg-muted" />
+      </HoverCardTrigger>
+      <HoverCardContent side="right" align="start" className="w-auto p-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={large ?? src} alt="" className="max-w-[420px] max-h-[360px] w-auto h-auto rounded object-contain bg-muted" />
+        <div className="mt-1.5 text-[11px] text-muted-foreground max-w-[420px] break-all">{caption}</div>
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
+
 function TargetLine({ target, href }: { target: VersionTarget; href: string }) {
   return (
     <div className="flex items-center gap-2 min-w-0">
-      {target.thumbnailUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={target.thumbnailUrl} alt="" className="h-8 w-8 rounded object-cover border border-border shrink-0" />
-      ) : (
-        <div className="h-8 w-8 rounded bg-muted border border-border shrink-0" />
-      )}
+      <Thumb src={target.thumbnailUrl} large={target.previewUrl ?? target.thumbnailUrl} caption={`${target.fileName} · ${formatBytes(target.fileSize)}${target.versionNumber != null ? ` · v${target.versionNumber}` : ""} · in Aprimo`} />
       <div className="min-w-0">
         <div className="text-xs font-medium truncate">{target.title || target.fileName}</div>
         <div className="text-[11px] text-muted-foreground truncate">
@@ -439,7 +472,7 @@ interface RawRecord {
       fileSize?: number
       versionNumber?: number
       createdOn?: string
-      _embedded?: { thumbnail?: { uri?: string } }
+      _embedded?: { thumbnail?: { uri?: string }; preview?: { uri?: string } }
     }
   }
 }
@@ -455,5 +488,6 @@ function toTarget(rec: RawRecord): VersionTarget {
     versionNumber: v?.versionNumber ?? null,
     modifiedOn: v?.createdOn ?? rec.modifiedOn ?? null,
     thumbnailUrl: v?._embedded?.thumbnail?.uri ?? null,
+    previewUrl: v?._embedded?.preview?.uri ?? null,
   }
 }
