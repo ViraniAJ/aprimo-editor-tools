@@ -45,6 +45,8 @@ interface LocalItem {
   /** Chosen target record id, or null to skip. */
   targetId: string | null
   auto: boolean
+  /** Text typed into the row's manual search; undefined when closed. */
+  search?: string
   status: Status
   progress: number
   error?: string
@@ -184,6 +186,17 @@ export default function BulkVersioningPage() {
 
   function update(uid: string, patch: Partial<LocalItem>) {
     setItems((prev) => prev.map((it) => (it.uid === uid ? { ...it, ...patch } : it)))
+  }
+
+  /** Chooses any record in scope for a row, adding it to the row's candidates as a manual match. */
+  function pickManual(uid: string, target: VersionTarget) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.uid !== uid) return it
+        const candidates = it.candidates.some((c) => c.target.recordId === target.recordId) ? it.candidates : [{ target, score: 0, reason: "manual" }, ...it.candidates]
+        return { ...it, candidates, targetId: target.recordId, auto: false, search: undefined, status: "pending", error: undefined }
+      }),
+    )
   }
 
   function removeItems(keep: (it: LocalItem) => boolean) {
@@ -353,30 +366,38 @@ export default function BulkVersioningPage() {
                           <TableCell className="align-top">
                             {it.status === "done" && chosen ? (
                               <TargetLine target={chosen} href={damUrl(chosen.recordId)} />
-                            ) : it.candidates.length ? (
+                            ) : (
                               <div className="flex flex-col gap-1.5">
-                                <Select value={it.targetId ?? "__skip"} onValueChange={(v) => update(it.uid, { targetId: v === "__skip" ? null : v, auto: false, status: "pending", error: undefined })} disabled={busy}>
-                                  <SelectTrigger className="h-8 text-xs max-w-md"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__skip" className="text-xs">Skip this file</SelectItem>
-                                    {it.candidates.map((c) => (
-                                      <SelectItem key={c.target.recordId} value={c.target.recordId} className="text-xs">
-                                        {c.target.fileName} · {c.score}% {c.reason}{c.target.title && c.target.title !== c.target.fileName ? ` · ${c.target.title}` : ""}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                {it.candidates.length > 0 && (
+                                  <Select value={it.targetId ?? "__skip"} onValueChange={(v) => update(it.uid, { targetId: v === "__skip" ? null : v, auto: false, status: "pending", error: undefined })} disabled={busy}>
+                                    <SelectTrigger className="h-8 text-xs max-w-md"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__skip" className="text-xs">Skip this file</SelectItem>
+                                      {it.candidates.map((c) => (
+                                        <SelectItem key={c.target.recordId} value={c.target.recordId} className="text-xs">
+                                          {c.target.fileName} · {c.reason === "manual" ? "chosen by you" : `${c.score}% ${c.reason}`}{c.target.title && c.target.title !== c.target.fileName ? ` · ${c.target.title}` : ""}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
                                 {chosen && <TargetLine target={chosen} href={damUrl(chosen.recordId)} />}
+                                {!it.candidates.length && <span className="text-xs text-muted-foreground">{targets.length ? "No similar file name in this classification." : "Load records to match."}</span>}
+                                {targets.length > 0 && it.search === undefined ? (
+                                  <button onClick={() => update(it.uid, { search: "" })} className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground text-left w-fit" disabled={busy}>
+                                    {it.candidates.length ? "Pick a different record…" : "Pick a record manually…"}
+                                  </button>
+                                ) : targets.length > 0 ? (
+                                  <ManualSearch targets={targets} query={it.search ?? ""} onQuery={(v) => update(it.uid, { search: v })} onPick={(t) => pickManual(it.uid, t)} onClose={() => update(it.uid, { search: undefined })} />
+                                ) : null}
                                 {dup && <span className="text-[11px] text-amber-600">Another local file also targets this record; both would become versions.</span>}
                                 {sameSize && <span className="text-[11px] text-amber-600">Same name and size as the current version; it may already be up to date.</span>}
                               </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">{targets.length ? "No similar file name in this classification" : "Load records to match"}</span>
                             )}
                           </TableCell>
                           <TableCell className="align-top">
                             {chosenCand ? (
-                              <Badge variant={chosenCand.score >= AUTO_MATCH_SCORE ? "default" : "secondary"} className="text-[10px]">{chosenCand.score}%{it.auto ? " auto" : ""}</Badge>
+                              <Badge variant={chosenCand.score >= AUTO_MATCH_SCORE ? "default" : "secondary"} className="text-[10px]">{chosenCand.reason === "manual" ? "manual" : `${chosenCand.score}%${it.auto ? " auto" : ""}`}</Badge>
                             ) : it.candidates.length ? (
                               <Badge variant="outline" className="text-[10px]">review</Badge>
                             ) : null}
@@ -422,6 +443,39 @@ export default function BulkVersioningPage() {
         </motion.div>
       </main>
       <Footer />
+    </div>
+  )
+}
+
+/** Type-ahead over every record in scope, for rows the matcher could not place. */
+function ManualSearch({ targets, query, onQuery, onPick, onClose }: { targets: VersionTarget[]; query: string; onQuery: (v: string) => void; onPick: (t: VersionTarget) => void; onClose: () => void }) {
+  const needle = query.trim().toLowerCase()
+  const hits = (needle ? targets.filter((t) => t.fileName.toLowerCase().includes(needle) || t.title.toLowerCase().includes(needle)) : targets).slice(0, 25)
+  return (
+    <div className="rounded-md border border-border bg-card p-2 max-w-md">
+      <div className="flex items-center gap-2">
+        <Input autoFocus placeholder={`Search ${targets.length} records by file name or title…`} value={query} onChange={(e) => onQuery(e.target.value)} className="h-7 text-xs" />
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onClose} title="Close"><X className="w-3.5 h-3.5" /></Button>
+      </div>
+      <div className="mt-1.5 max-h-56 overflow-y-auto divide-y divide-border">
+        {hits.length === 0 && <div className="text-xs text-muted-foreground py-2 px-1">Nothing matches.</div>}
+        {hits.map((t) => (
+          <button key={t.recordId} onClick={() => onPick(t)} className="w-full text-left py-1.5 px-1 hover:bg-muted/60 rounded flex items-center gap-2">
+            {t.thumbnailUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={t.thumbnailUrl} alt="" className="h-7 w-7 rounded object-cover border border-border shrink-0" />
+            ) : (
+              <div className="h-7 w-7 rounded bg-muted border border-border shrink-0" />
+            )}
+            <span className="min-w-0">
+              <span className="block text-xs truncate">{t.fileName}</span>
+              {t.title && t.title !== t.fileName && <span className="block text-[11px] text-muted-foreground truncate">{t.title}</span>}
+            </span>
+            <span className="ml-auto text-[11px] text-muted-foreground shrink-0">{formatBytes(t.fileSize)}</span>
+          </button>
+        ))}
+        {targets.length > hits.length && needle === "" && <div className="text-[11px] text-muted-foreground py-1.5 px-1">Showing the first {hits.length}; type to narrow.</div>}
+      </div>
     </div>
   )
 }

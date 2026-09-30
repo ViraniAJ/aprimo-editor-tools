@@ -48,7 +48,7 @@ function tokens(stem: string): string[] {
 // Trailing revision markers on the space-joined name: v2, ver 3, rev1, final, draft, copy, (1), 2026-09-30…
 const TRAILING_REVISION = /\s*(\(\d+\)|v\s*\d+[a-z]?|ver(sion)?\s*\d+|rev\s*\d+|r\s*\d+|final|draft|copy|new|old|latest|updated|edit(ed)?|\d{4}\s\d{2}\s\d{2}|\d{8})$/
 // Tokens that never distinguish one asset from another: sizes, counters, "original"-type words.
-const NEUTRAL = /^(\d{1,5}x\d{1,5}|\(\d+\)|og|orig|original|master|source|src|export|exported|out|output|hires|hi|res|rgb|srgb|cmyk|final|draft|copy|new|old|latest|updated|edit|edited)$/
+const NEUTRAL = /^(\d{1,5}x\d{1,5}|\(\d+\)|og|orig|original|master|source|src|export|exported|out|output|hires|hi|res|rgb|srgb|cmyk|final|draft|copy|new|old|latest|updated|edit|edited|headshot|photo|photograph|image|img|pic|picture|shot|scan|file|asset)$/
 // Tokens that name a particular rendition or crop; two files with different ones may be different records.
 const VARIANT = /^(web|print|thumb|thumbnail|preview|crop|cropped|sq|square|wide|tall|portrait|landscape|small|medium|large|xs|s|m|l|xl|xxl|lores|lo|social|email|mobile|desktop)$/
 
@@ -142,6 +142,10 @@ export function scoreMatch(localName: string, target: VersionTarget): { score: n
   }
   const d = dice(lNorm, rNorm)
   if (d >= 0.6) return { score: Math.round(30 + d * 40), reason: `${Math.round(d * 100)}% similar` }
+  // Any shared word of four or more letters (not a number) is worth surfacing for review.
+  const words = (b: string) => new Set(b.split(" ").filter((w) => w.length >= 4 && /[a-z]/.test(w)))
+  const shared2 = [...words(l.base)].filter((w) => words(r.base).has(w))
+  if (shared2.length) return { score: Math.min(60, 36 + (shared2.length - 1) * 12), reason: `shares "${shared2.join(" ")}"` }
   return { score: 0, reason: "" }
 }
 
