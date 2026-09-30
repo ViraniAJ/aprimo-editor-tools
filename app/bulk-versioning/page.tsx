@@ -262,6 +262,10 @@ export default function BulkVersioningPage() {
   const done = items.filter((it) => it.status === "done").length
   const failed = items.filter((it) => it.status === "error").length
   const busy = running || items.some((it) => it.status === "uploading" || it.status === "versioning")
+  // Guided flow: each step unlocks when the one before it is complete. Step 1 always stays editable.
+  const step1: StepState = targets.length ? "done" : "active"
+  const step2: StepState = !targets.length ? "locked" : items.length ? "done" : "active"
+  const step3: StepState = !targets.length || !items.length ? "locked" : items.every((it) => it.status === "done" || !it.targetId) && done > 0 ? "done" : "active"
   const damUrl = (recordId: string) => `https://${connection?.environment}.dam.aprimo.com/dam/contentitems/${recordId.replace(/-/g, "")}`
   // A record chosen by more than one local file would get several versions in a row; flag it.
   const targetUse = new Map<string, number>()
@@ -279,9 +283,9 @@ export default function BulkVersioningPage() {
           {/* Steps 1 and 2 side by side on wide screens */}
           <div className="grid gap-6 lg:grid-cols-2 mb-6 items-stretch">
           {/* Step 1: scope */}
-          <Card className="flex flex-col">
+          <Card className={`flex flex-col ${stepCardClass(step1)}`}>
             <CardHeader>
-              <CardTitle className="text-lg">1. Records to version</CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2"><StepMarker n={1} state={step1} /> Records to version</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <div className="space-y-1.5">
@@ -300,9 +304,9 @@ export default function BulkVersioningPage() {
           </Card>
 
           {/* Step 2: files */}
-          <Card className="flex flex-col">
+          <Card className={`flex flex-col ${stepCardClass(step2)}`} aria-disabled={step2 === "locked"}>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-lg">2. Updated files</CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2"><StepMarker n={2} state={step2} /> Updated files{step2 === "locked" && <span className="text-xs font-normal text-muted-foreground">Load records in step 1 first</span>}</CardTitle>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={busy}><FileIcon className="w-4 h-4" /> Add files</Button>
                 <Button variant="outline" size="sm" onClick={() => folderInputRef.current?.click()} disabled={busy}><FolderOpen className="w-4 h-4" /> Add folder</Button>
@@ -368,11 +372,11 @@ export default function BulkVersioningPage() {
           </div>
 
           {/* Step 3: review */}
-          {items.length > 0 && (
-            <Card className="mb-6 scroll-mt-20" id="bv-matches">
+          {items.length > 0 ? (
+            <Card className={`mb-6 scroll-mt-20 ${stepCardClass(step3)}`} id="bv-matches" aria-disabled={step3 === "locked"}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-lg">
-                  3. Matches <span className="text-muted-foreground text-sm font-normal">{matched} matched{lowConfidence ? ` (${lowConfidence} low confidence)` : ""} · {unmatched} unmatched · {done} done{failed ? ` · ${failed} failed` : ""}</span>
+                <CardTitle className="text-lg flex flex-wrap items-center gap-2">
+                  <StepMarker n={3} state={step3} /> Review and version {step3 === "locked" && <span className="text-xs font-normal text-muted-foreground">Load records in step 1 to match these files</span>}<span className="text-muted-foreground text-sm font-normal">{matched} matched{lowConfidence ? ` (${lowConfidence} low confidence)` : ""} · {unmatched} unmatched · {done} done{failed ? ` · ${failed} failed` : ""}</span>
                 </CardTitle>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setItems((prev) => prev.map((it) => rematch(it, targets)))} disabled={busy || !targets.length}><RefreshCw className="w-4 h-4" /> Re-match</Button>
@@ -471,6 +475,12 @@ export default function BulkVersioningPage() {
                 </Table>
               </CardContent>
             </Card>
+          ) : (
+            <Card className={`mb-6 ${stepCardClass("locked")}`} aria-disabled>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2"><StepMarker n={3} state="locked" /> Review and version <span className="text-xs font-normal text-muted-foreground">{targets.length ? "Add files in step 2 to see matches" : "Complete steps 1 and 2 first"}</span></CardTitle>
+              </CardHeader>
+            </Card>
           )}
 
           {/* Footer actions */}
@@ -478,7 +488,7 @@ export default function BulkVersioningPage() {
             <div className="text-xs text-muted-foreground">
               {items.length} file{items.length === 1 ? "" : "s"} · {matched} matched{lowConfidence ? <span className="text-amber-600"> · {lowConfidence} below {AUTO_MATCH_SCORE}%, check before versioning</span> : null} · {done} versioned{failed ? ` · ${failed} failed` : ""}
             </div>
-            <Button onClick={versionAll} disabled={busy || matched === 0}>
+            <Button onClick={versionAll} disabled={busy || matched === 0 || step3 === "locked"}>
               {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Versioning…</> : <><Layers className="w-4 h-4" /> Version all ({matched})</>}
             </Button>
           </div>
@@ -519,6 +529,29 @@ function ManualSearch({ targets, query, onQuery, onPick, onClose }: { targets: V
         {targets.length > hits.length && needle === "" && <div className="text-[11px] text-muted-foreground py-1.5 px-1">Showing the first {hits.length}; type to narrow.</div>}
       </div>
     </div>
+  )
+}
+
+type StepState = "active" | "done" | "locked"
+
+/** Active step is spotlit, finished steps stay usable, later steps are dimmed and inert. */
+function stepCardClass(state: StepState): string {
+  if (state === "active") return "ring-2 ring-primary shadow-lg transition-all duration-300"
+  if (state === "done") return "transition-all duration-300"
+  return "opacity-45 pointer-events-none select-none grayscale-[40%] transition-all duration-300"
+}
+
+function StepMarker({ n, state }: { n: number; state: StepState }) {
+  if (state === "done")
+    return (
+      <span className="h-6 w-6 rounded-full bg-green-600 text-white flex items-center justify-center shrink-0" aria-label={`Step ${n} complete`}>
+        <CheckCircle2 className="h-4 w-4" />
+      </span>
+    )
+  return (
+    <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${state === "active" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground border border-border"}`}>
+      {n}
+    </span>
   )
 }
 
