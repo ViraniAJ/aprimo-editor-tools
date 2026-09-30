@@ -28,21 +28,69 @@ export function extensionOf(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : ""
 }
 
+/** Splits a stem into comparable tokens: lower-case, separators and letter/digit boundaries become spaces. Size tokens (10x10) stay whole. */
+function tokens(stem: string): string[] {
+  return stem
+    .toLowerCase()
+    .replace(/(\d+)x(\d+)/g, "$1×$2")
+    .replace(/([a-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-z])/g, "$1 $2")
+    .replace(/[\s_\-.,+]+/g, " ")
+    .replace(/\(\s*(\d+)\s*\)/g, " ($1) ")
+    .replace(/×/g, "x")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+// Trailing revision markers on the space-joined name: v2, ver 3, rev1, final, draft, copy, (1), 2026-09-30…
+const TRAILING_REVISION = /\s*(\(\d+\)|v\s*\d+[a-z]?|ver(sion)?\s*\d+|rev\s*\d+|r\s*\d+|final|draft|copy|new|old|latest|updated|edit(ed)?|\d{4}\s\d{2}\s\d{2}|\d{8})$/
+// Tokens that never distinguish one asset from another: sizes, counters, "original"-type words.
+const NEUTRAL = /^(\d{1,5}x\d{1,5}|\(\d+\)|og|orig|original|master|source|src|export|exported|out|output|hires|hi|res|rgb|srgb|cmyk|final|draft|copy|new|old|latest|updated|edit|edited)$/
+// Tokens that name a particular rendition or crop; two files with different ones may be different records.
+const VARIANT = /^(web|print|thumb|thumbnail|preview|crop|cropped|sq|square|wide|tall|portrait|landscape|small|medium|large|xs|s|m|l|xl|xxl|lores|lo|social|email|mobile|desktop)$/
+
 /**
  * Normalises a file name for comparison: lower-case, no extension, separators
- * collapsed, and common revision markers removed (v2, _final, (1), copy…).
+ * collapsed, and trailing revision markers removed (v2, _final, (1), copy…).
  */
 export function normalizeName(name: string): string {
-  let s = stripExtension(name).toLowerCase()
-  s = s.replace(/[\s_\-.]+/g, " ").trim()
-  // Trailing revision markers, possibly repeated: "banner v2 final (1)"
-  const marker = /\s*(\(\d+\)|v\d+[a-z]?|ver(sion)?\s*\d+|rev\s*\d+|r\d+|final|draft|copy|new|old|latest|updated|edit(ed)?|\d{4}[-\s]?\d{2}[-\s]?\d{2})$/
+  let s = tokens(stripExtension(name)).join(" ")
   let prev = ""
-  while (prev !== s) {
+  while (prev !== s && s.includes(" ")) {
     prev = s
-    s = s.replace(marker, "").trim()
+    s = s.replace(TRAILING_REVISION, "").trim()
   }
-  return s.replace(/\s+/g, " ")
+  return s
+}
+
+/**
+ * Stronger normalisation for "same asset, different rendition": drops neutral
+ * tokens (sizes, counters, "original") and variant words anywhere, and reports
+ * which variant words were removed so the caller can tell portrait from
+ * landscape. Plain numbers are kept, so IMG_1234 and IMG_5678 stay distinct.
+ */
+export function baseName(name: string): { base: string; variants: string[] } {
+  const variants: string[] = []
+  const kept: string[] = []
+  for (const t of tokens(normalizeName(name))) {
+    if (NEUTRAL.test(t)) continue
+    if (VARIANT.test(t)) {
+      variants.push(t)
+      continue
+    }
+    kept.push(t)
+  }
+  return { base: kept.join(" "), variants: variants.sort() }
+}
+
+/** Longest common leading token sequence of two base names. */
+function sharedPrefix(a: string, b: string): string[] {
+  const A = a.split(" ")
+  const B = b.split(" ")
+  const out: string[] = []
+  for (let i = 0; i < Math.min(A.length, B.length) && A[i] === B[i]; i++) out.push(A[i])
+  return out
 }
 
 function bigrams(s: string): Set<string> {
@@ -74,8 +122,21 @@ export function scoreMatch(localName: string, target: VersionTarget): { score: n
   const lNorm = normalizeName(localName)
   const rNorm = normalizeName(remote)
   if (lNorm && lNorm === rNorm) return { score: sameExt ? 88 : 80, reason: "same name ignoring revision markers" }
+  const l = baseName(localName)
+  const r = baseName(remote)
+  if (l.base && l.base.length >= 3 && l.base === r.base) {
+    const sameVariants = l.variants.join(",") === r.variants.join(",")
+    if (sameVariants) return { score: sameExt ? 84 : 78, reason: "same name ignoring size and revision markers" }
+    if (!l.variants.length || !r.variants.length) return { score: sameExt ? 80 : 74, reason: `same name, ${(l.variants.length ? l.variants : r.variants).join(" ")} variant` }
+    return { score: 76, reason: `same name, ${l.variants.join(" ")} vs ${r.variants.join(" ")}` }
+  }
   if (lNorm && rNorm && lNorm.length >= 4 && rNorm.length >= 4 && (lNorm.includes(rNorm) || rNorm.includes(lNorm))) {
     return { score: sameExt ? 70 : 62, reason: "one name contains the other" }
+  }
+  const shared = sharedPrefix(l.base, r.base)
+  const sharedChars = shared.join("").length
+  if (shared.length >= 2 && sharedChars >= 6 && sharedChars * 2 >= Math.min(l.base.replace(/ /g, "").length, r.base.replace(/ /g, "").length)) {
+    return { score: sameExt ? 72 : 66, reason: `shared name "${shared.join(" ")}"` }
   }
   const d = dice(lNorm, rNorm)
   if (d >= 0.6) return { score: Math.round(30 + d * 40), reason: `${Math.round(d * 100)}% similar` }
