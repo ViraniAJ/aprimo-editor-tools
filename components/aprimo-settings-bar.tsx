@@ -2,15 +2,11 @@
 
 import { Settings } from "lucide-react"
 import { useAprimo } from "@/context/aprimo-context"
+import { openConnectionManager } from "@/lib/profiles"
 import { Button } from "@/components/ui/button"
 import { LanguagePicker } from "@/components/language-picker"
 import { useSearchParams } from "next/navigation"
 
-const ALL_FROM_ENV = !!(
-  process.env.NEXT_PUBLIC_APRIMO_ENVIRONMENT &&
-  process.env.NEXT_PUBLIC_APRIMO_CLIENT_ID &&
-  process.env.NEXT_PUBLIC_APRIMO_CLIENT_SECRET
-)
 
 export function AprimoSettingsBar() {
   const { connection, isConnected } = useAprimo()
@@ -26,13 +22,13 @@ export function AprimoSettingsBar() {
         </span>
       )}
       <LanguagePicker />
-      {!ALL_FROM_ENV && isConnected && (
+      {isConnected && (
         <Button
           size="sm"
           variant="ghost"
           className="h-7 w-7 p-0"
-          title="Aprimo settings"
-          onClick={() => window.dispatchEvent(new Event("aprimo:open-config"))}
+          title="Switch or add environments"
+          onClick={openConnectionManager}
         >
           <Settings className="h-4 w-4" />
         </Button>

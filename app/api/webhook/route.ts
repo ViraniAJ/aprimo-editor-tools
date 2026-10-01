@@ -68,6 +68,8 @@ export async function POST(request: NextRequest) {
 
     const { recordIds } = payload as { recordIds?: string }
     const mode = request.nextUrl.searchParams.get("mode")
+    // Optional ?env=<subdomain> on the action URL tells the tool which environment to connect to.
+    const env = request.nextUrl.searchParams.get("env")
     let finalUrl = returnUrl
 
     if (recordIds) {
@@ -93,6 +95,12 @@ export async function POST(request: NextRequest) {
         url.searchParams.set("requestId", requestId)
         finalUrl = url.toString()
       }
+    }
+
+    if (env && /^[a-z0-9-]+$/i.test(env)) {
+      const url = new URL(finalUrl)
+      url.searchParams.set("env", env.toLowerCase())
+      finalUrl = url.toString()
     }
 
     return NextResponse.json({ url: finalUrl }, { status: 200 })

@@ -29,15 +29,10 @@ export default function Home() {
                 Connect to Aprimo
               </Button>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                This hosted version is intended for demo use with Aprimo trial environments. Using a non-trial environment?{" "}
-                <a
-                  href="https://github.com/Aprimo-Connect/aprimo-editor-tools"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-foreground transition-colors"
-                >
-                  Self-host</a> and set your environment variables for all users.
-                
+                Connects to {process.env.NEXT_PUBLIC_APRIMO_ENVIRONMENT || "your environment"} with your own Aprimo login.{" "}
+                <button onClick={() => window.dispatchEvent(new CustomEvent("aprimo:open-config", { detail: { manage: true } }))} className="underline hover:text-foreground transition-colors">
+                  Use another environment
+                </button>
               </p>
             </div>
           )}
