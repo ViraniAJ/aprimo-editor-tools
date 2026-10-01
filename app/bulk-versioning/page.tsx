@@ -76,6 +76,7 @@ export default function BulkVersioningPage() {
   const [comment, setComment] = useState("")
   const [reading, setReading] = useState(false)
   const [running, setRunning] = useState(false)
+  const [filter, setFilter] = useState<MatchFilter>("all")
 
   useEffect(() => {
     if (!isConnected) router.replace("/")
@@ -242,9 +243,10 @@ export default function BulkVersioningPage() {
   }
 
   async function versionAll() {
-    const todo = items.filter((it) => it.targetId && it.status !== "done" && it.status !== "uploading" && it.status !== "versioning")
+    // Only the rows the current filter shows.
+    const todo = items.filter((it) => matchesFilter(it, filter) && isVersionable(it))
     if (!todo.length) {
-      toast.error("No confirmed matches to version")
+      toast.error(filter === "all" ? "No confirmed matches to version" : "No versionable rows in this filter")
       return
     }
     setRunning(true)
@@ -255,6 +257,9 @@ export default function BulkVersioningPage() {
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
+  const visibleItems = items.filter((it) => matchesFilter(it, filter))
+  const filterCounts = Object.fromEntries(MATCH_FILTERS.map((f) => [f.key, items.filter((it) => matchesFilter(it, f.key)).length])) as Record<MatchFilter, number>
+  const versionableShown = visibleItems.filter(isVersionable).length
   const targetById = useMemo(() => new Map(targets.map((t) => [t.recordId, t])), [targets])
   const matched = items.filter((it) => it.targetId && it.status !== "done").length
   const lowConfidence = items.filter((it) => it.targetId && it.status !== "done" && (it.candidates.find((c) => c.target.recordId === it.targetId)?.score ?? 100) < AUTO_MATCH_SCORE && it.candidates.find((c) => c.target.recordId === it.targetId)?.reason !== "manual").length
@@ -384,6 +389,24 @@ export default function BulkVersioningPage() {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
+                <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 border-y border-border bg-muted/30">
+                  <span className="text-xs text-muted-foreground mr-1">Show</span>
+                  {MATCH_FILTERS.map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setFilter(f.key)}
+                      disabled={filterCounts[f.key] === 0 && f.key !== "all"}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${filter === f.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border hover:bg-muted"}`}
+                    >
+                      {f.dot && <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />}
+                      {f.label}
+                      <span className={`tabular-nums ${filter === f.key ? "opacity-80" : "text-muted-foreground"}`}>{filterCounts[f.key]}</span>
+                    </button>
+                  ))}
+                  {filter !== "all" && (
+                    <span className="ml-auto text-xs text-muted-foreground">Version all applies to the {visibleItems.length} row{visibleItems.length === 1 ? "" : "s"} shown</span>
+                  )}
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -395,7 +418,12 @@ export default function BulkVersioningPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.map((it) => {
+                    {visibleItems.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">No files in this filter.</TableCell>
+                      </TableRow>
+                    )}
+                    {visibleItems.map((it) => {
                       const chosen = it.targetId ? targetById.get(it.targetId) : undefined
                       const chosenCand = it.candidates.find((c) => c.target.recordId === it.targetId)
                       const dup = it.targetId ? (targetUse.get(it.targetId) ?? 0) > 1 : false
@@ -488,8 +516,8 @@ export default function BulkVersioningPage() {
             <div className="text-xs text-muted-foreground">
               {items.length} file{items.length === 1 ? "" : "s"} · {matched} matched{lowConfidence ? <span className="text-amber-600"> · {lowConfidence} below {AUTO_MATCH_SCORE}%, check before versioning</span> : null} · {done} versioned{failed ? ` · ${failed} failed` : ""}
             </div>
-            <Button onClick={versionAll} disabled={busy || matched === 0 || step3 === "locked"}>
-              {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Versioning…</> : <><Layers className="w-4 h-4" /> Version all ({matched})</>}
+            <Button onClick={versionAll} disabled={busy || versionableShown === 0 || step3 === "locked"}>
+              {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Versioning…</> : <><Layers className="w-4 h-4" /> {filter === "all" ? `Version all (${versionableShown})` : `Version ${versionableShown} shown`}</>}
             </Button>
           </div>
         </motion.div>
@@ -530,6 +558,44 @@ function ManualSearch({ targets, query, onQuery, onPick, onClose }: { targets: V
       </div>
     </div>
   )
+}
+
+// ── Match filters ────────────────────────────────────────────────────────────
+type MatchFilter = "all" | "exact" | "high" | "medium" | "low" | "manual" | "none" | "done"
+
+const MATCH_FILTERS: Array<{ key: MatchFilter; label: string; dot?: string }> = [
+  { key: "all", label: "All" },
+  { key: "exact", label: "100%", dot: "bg-green-600" },
+  { key: "high", label: "80% and up", dot: "bg-green-600" },
+  { key: "medium", label: "60 to 79%", dot: "bg-amber-500" },
+  { key: "low", label: "Below 60%", dot: "bg-red-500" },
+  { key: "manual", label: "Manual", dot: "bg-muted-foreground" },
+  { key: "none", label: "No match", dot: "bg-muted-foreground/40" },
+  { key: "done", label: "Versioned", dot: "bg-green-600" },
+]
+
+function chosenCandidate(it: LocalItem): Candidate | undefined {
+  return it.candidates.find((c) => c.target.recordId === it.targetId)
+}
+
+/** Which rows a filter shows. Score filters cover rows still to version; "Versioned" shows finished ones. */
+function matchesFilter(it: LocalItem, f: MatchFilter): boolean {
+  if (f === "all") return true
+  if (f === "done") return it.status === "done"
+  if (it.status === "done") return false
+  const c = chosenCandidate(it)
+  if (f === "none") return !c
+  if (!c) return false
+  if (f === "manual") return c.reason === "manual"
+  if (c.reason === "manual") return false
+  if (f === "exact") return c.score === 100
+  if (f === "high") return c.score >= AUTO_MATCH_SCORE
+  if (f === "medium") return c.score >= 60 && c.score < AUTO_MATCH_SCORE
+  return c.score < 60
+}
+
+function isVersionable(it: LocalItem): boolean {
+  return !!it.targetId && it.status !== "done" && it.status !== "uploading" && it.status !== "versioning"
 }
 
 type StepState = "active" | "done" | "locked"
