@@ -104,14 +104,14 @@ export default function Home() {
                   </p>
                 </div>
               </Link>
-              <Link href="/rendition-cleanup">
+              <Link href="/additional-file-cleanup">
                 <div className="border border-border rounded-lg p-6 text-left bg-card hover:bg-muted/50 transition-colors cursor-pointer">
                   <div className="flex items-center gap-3 mb-2">
                     <Eraser className="h-5 w-5 text-primary" />
-                    <h2 className="text-lg font-semibold">Rendition Cleanup</h2>
+                    <h2 className="text-lg font-semibold">Additional File Cleanup</h2>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Pick a collection, scan its records, and remove renditions, crops or other additional files in bulk, filtered by type, label or format.
+                    Pick a collection, scan its records, and remove additional files such as renditions, crops and trims in bulk, filtered by type, label or format.
                   </p>
                 </div>
               </Link>
