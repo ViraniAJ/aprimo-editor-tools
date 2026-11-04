@@ -3,7 +3,7 @@
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
-import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users, FlaskConical, Layers, Images } from "lucide-react"
+import { FileSpreadsheet, Upload, Clapperboard, House, LayoutTemplate, Copy, PenLine, Mic, BarChart2, Package2, Users, FlaskConical, Layers, Images, Eraser } from "lucide-react"
 import Link from "next/link"
 import { useAprimo } from "@/context/aprimo-context"
 
@@ -101,6 +101,17 @@ export default function Home() {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Drop preview images or a folder, match them to records in a classification by file name, and add each as a preview on the current version.
+                  </p>
+                </div>
+              </Link>
+              <Link href="/rendition-cleanup">
+                <div className="border border-border rounded-lg p-6 text-left bg-card hover:bg-muted/50 transition-colors cursor-pointer">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Eraser className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">Rendition Cleanup</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Pick a collection, scan its records, and remove renditions, crops or other additional files in bulk, filtered by type, label or format.
                   </p>
                 </div>
               </Link>
